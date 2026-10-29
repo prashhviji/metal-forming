@@ -34,3 +34,12 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
+
+# local database (SQLite)
+/data/
+
+# ML artefacts (virtualenv, trained models, local datasets)
+/ml/.venv/
+/ml/models/
+/ml/data/
+__pycache__/

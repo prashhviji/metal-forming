@@ -1,234 +1,116 @@
-# CNC Machine Predictive Maintenance Dashboard
+# CNC Monitor — Predictive Maintenance & MQL Lubrication
 
-A modern, real-time predictive maintenance monitoring system for CNC machines built with Next.js 14, TypeScript, Tailwind CSS, and Chart.js.
+CIM project (Department of Mechanical Engineering, VIT Chennai): a web dashboard that monitors a CNC machine's
+**vibration, temperature and motor current**, raises **threshold alerts**, and runs a **temperature-triggered MQL
+(minimum quantity lubrication)** control rule. Everything is stored in a **local SQLite database** — no cloud service.
 
-## Features
+Built with Next.js 14 (App Router), TypeScript, Tailwind CSS, Chart.js and `better-sqlite3`.
 
-- 📊 **Real-time Monitoring Dashboard** - Live visualization of vibration, temperature, and current sensors
-- 🚨 **Intelligent Alert System** - Automated threshold-based anomaly detection
-- 🤖 **AI Maintenance Insights** - Predictive analytics for component health and maintenance scheduling
-- 📱 **Responsive Design** - Industrial dark theme with professional UI/UX
-- 📈 **Interactive Charts** - Dynamic time-series data visualization with Chart.js
-- ⚡ **High Performance** - Built on Next.js 14 App Router for optimal speed
+> **Honest status.** Alerts are fixed-threshold checks. No trained prediction model exists, and no accuracy,
+> downtime or tool-life claims are made. Until the sensor node posts real readings, the app runs on a built-in
+> **simulator** and says so in the header of every page. See *About* in the app for the validation plan.
 
-## Tech Stack
-
-- **Framework:** Next.js 14 (App Router)
-- **Language:** TypeScript
-- **Styling:** Tailwind CSS
-- **Components:** shadcn/ui
-- **Charts:** Chart.js with react-chartjs-2
-- **Icons:** Lucide React
-
-## Project Structure
-
-```
-/app
-  /dashboard       # Main monitoring dashboard with real-time charts
-  /alerts          # Alert history and threshold violations
-  /analysis        # AI-powered maintenance insights
-  /about           # System documentation and explanations
-  /api
-    /sensor-data   # Synthetic sensor data API endpoint
-  layout.tsx       # Root layout
-  page.tsx         # Home page (redirects to dashboard)
-  globals.css      # Global styles
-
-/components
-  /ui              # shadcn/ui components (Card, Badge, Table)
-  sidebar.tsx      # Navigation sidebar
-  sensor-chart.tsx # Reusable chart component
-  status-card.tsx  # Status indicator cards
-
-/lib
-  utils.ts         # Utility functions
-
-/types
-  sensor.ts        # TypeScript type definitions
-```
-
-## Installation & Setup
-
-### Prerequisites
-
-- Node.js 18.x or higher
-- npm or yarn
-
-### Steps
-
-1. **Install Dependencies**
+## Run it
 
 ```bash
 npm install
-```
-
-2. **Run Development Server**
-
-```bash
 npm run dev
 ```
 
-3. **Open Browser**
+Open <http://localhost:3000>. On first start the app creates `data/cnc-monitor.db` and fills it with one hour of
+simulated history so every page has something to show. Requires Node 20 or newer.
 
-Navigate to [http://localhost:3000](http://localhost:3000)
+If `better-sqlite3` fails to load after install (native module), run `npm rebuild better-sqlite3`.
 
-The application will automatically redirect to the dashboard page.
+## Pages
 
-## Available Scripts
+| Page | What it does |
+|------|--------------|
+| **Dashboard** | Live values with sparklines, MQL status, all sensors as % of their limit on one chart, recent alerts, last-hour summary |
+| **Live Data** | Per-sensor charts for 5 min – 24 h (peak per bucket), pause, latest samples, CSV export |
+| **Analytics** | Mean / std / min / max / p95, share of time over limit, drift per hour, sensor correlation, alerts over time, plain-language observations |
+| **Alerts** | Alert history with status (active / acknowledged / resolved), filters, acknowledge, CSV export |
+| **Lubrication** | MQL state, automatic on/off, manual spray, tuning (activation °C, spray s, cooldown s, nozzle ml/s), spray log and 1 h activity chart |
+| **Settings** | Data source (simulator / hardware), alert limits, machine profile, database info, CSV export, clear data |
+| **About** | Project description, architecture, implementation status and validation plan |
+
+## How it works
+
+1. A reading (`vibration`, `temperature`, `current`) arrives — from the simulator or `POST /api/readings`.
+2. It is stored, then compared with the alert limits. A limit breach opens an alert (severity: vibration *Critical*,
+   temperature *High*, current *Medium*); three consecutive in-range readings resolve it.
+3. The MQL rule runs on the same reading: if automatic control is enabled and `temperature ≥ activation temp` and the
+   cooldown has passed, the valve opens for the spray duration. The spray is logged with an **estimated** volume
+   (`duration × nozzle flow`) — calibrate the flow against measured lubricant before quoting numbers.
+
+Defaults: vibration 0.3 g · temperature 45 °C · current 3.0 A · MQL at 42 °C, 10 s spray, 30 s cooldown, 0.2 ml/s.
+
+## Connecting the real sensor node
+
+In **Settings → Data source** choose *Hardware sensors*, then send one JSON reading per sample:
 
 ```bash
-npm run dev      # Start development server
-npm run build    # Build for production
-npm start        # Start production server
-npm run lint     # Run ESLint
+curl -X POST http://<this-computer-ip>:3000/api/readings \
+  -H "Content-Type: application/json" \
+  -d '{"vibration":0.18,"temperature":39.5,"current":2.2}'
 ```
 
-## API Documentation
+The reply contains the lubrication valve command, so the microcontroller needs no extra request:
 
-### GET /api/sensor-data
-
-Returns synthetic CNC sensor data for demonstration purposes.
-
-**Response:**
 ```json
-{
-  "data": [
-    {
-      "time": 0.0,
-      "vibration": 0.175,
-      "temperature": 39.5,
-      "current": 2.15,
-      "label": "normal"
-    },
-    ...
-  ],
-  "thresholds": {
-    "vibration": 0.3,
-    "temperature": 45,
-    "current": 3.0
-  },
-  "metadata": {
-    "totalPoints": 301,
-    "duration": 30,
-    "samplingRate": 10
-  }
-}
+{ "ok": true, "ts": 1793249356260, "mql": { "enabled": true, "valve": "off", "phase": "armed" }, "alerts": { "active": 0 } }
 ```
 
-**Data Characteristics:**
-- Time range: 0-30 seconds (step: 0.1s)
-- ~300 data points
-- Abnormal spike between t=10-15 seconds
-- Threshold-based labeling
+Open or close the valve when `mql.valve` is `"on"` / `"off"`. To reach the app from another device on the network, start it
+with `npm run dev -- -H 0.0.0.0`. An ESP32 example is in Settings. In simulator mode this endpoint answers `409`.
 
-## Sensor Thresholds
+## API
 
-| Sensor | Normal Range | Threshold | Severity |
-|--------|-------------|-----------|----------|
-| Vibration | < 0.3 g | 0.3 g | Critical |
-| Temperature | < 45°C | 45°C | High |
-| Current | < 3.0 A | 3.0 A | Medium |
+All routes return JSON (`Cache-Control: no-store`); errors are `{ "error": "…" }`.
 
-## Pages Overview
+| Route | Purpose |
+|-------|---------|
+| `GET /api/status` | Latest reading, link state, thresholds, MQL state, open-alert counts, DB stats |
+| `GET /api/readings?range=5m\|15m\|1h\|6h\|24h` | Peak-per-bucket time series (~300 points) |
+| `POST /api/readings` | Hardware ingestion (see above) |
+| `GET /api/alerts?status=&type=&limit=&offset=` · `POST /api/alerts` | List; `{action:"acknowledge",id}` or `{action:"acknowledge_all"}` |
+| `GET /api/lubrication` · `POST /api/lubrication` | MQL summary and log; `{action:"spray_now"\|"stop"}` |
+| `GET /api/settings` · `PUT /api/settings` | Thresholds, MQL config, engine config, machine profile (partial updates, validated) |
+| `GET /api/analytics?range=` | Statistics, correlation, alert buckets, observations |
+| `GET /api/export?kind=readings\|alerts\|lubrication&range=` | CSV download |
+| `POST /api/system` | `{action:"inject_fault"}` (simulator) or `{action:"reset_data",reseed}` |
 
-### Dashboard (`/dashboard`)
-- Real-time sensor visualization
-- 3 interactive line charts (vibration, temperature, current)
-- Status cards with color-coded health indicators
-- Auto-refresh every 5 seconds
+## Database
 
-### Alerts (`/alerts`)
-- Comprehensive alert history table
-- Threshold violation detection
-- Severity classification (Critical/High/Medium)
-- Alert summary statistics
+SQLite file at `data/cnc-monitor.db` (git-ignored; override the folder with `CNC_DB_DIR`). Tables: `machines`,
+`settings`, `readings`, `alerts`, `lubrication_events`; the schema is versioned with `PRAGMA user_version` in
+[`lib/server/db.ts`](lib/server/db.ts). Readings older than 7 days are pruned; alerts and spray events are kept.
+To start over, use *Settings → Clear data* or delete the `data/` folder while the server is stopped.
 
-### Analysis (`/analysis`)
-- AI-generated maintenance insights
-- Component health assessment
-  - Tool life remaining (%)
-  - Spindle health status
-  - Bearing condition
-- Maintenance recommendations
-- Overall machine health score
+## Project layout
 
-### About (`/about`)
-- Detailed sensor explanations
-- Abnormality causes and consequences
-- Predictive maintenance methodology
-- System architecture documentation
-
-## Customization
-
-### Modify Sensor Thresholds
-
-Edit `app/api/sensor-data/route.ts`:
-
-```typescript
-const THRESHOLDS = {
-  vibration: 0.3,    // Change threshold
-  temperature: 45,   // Change threshold
-  current: 3.0,      // Change threshold
-};
+```
+app/(app)/            pages: dashboard, live, analytics, alerts, lubrication, settings, about
+app/api/              route handlers (thin wrappers over lib/server)
+components/           app shell, sidebar, charts, sensor card, UI kit (components/ui/kit.tsx)
+lib/server/           db.ts (SQLite + migrations), engine.ts (simulator, alerts, MQL), queries.ts, settings.ts
+lib/client/           polling hook and JSON helpers
+instrumentation.ts    starts the engine when the server boots so history keeps accumulating
+types/monitor.ts      types shared by API and UI
 ```
 
-### Adjust Data Generation
-
-Modify the `generateSensorData()` function in `app/api/sensor-data/route.ts` to change:
-- Time range
-- Baseline values
-- Spike timing and intensity
-- Sampling rate
-
-### Customize Theme Colors
-
-Edit `tailwind.config.ts` and `app/globals.css` for color scheme modifications.
-
-## Production Deployment
-
-### Build for Production
+## Scripts
 
 ```bash
-npm run build
-npm start
+npm run dev         # development server
+npm run build       # production build
+npm start           # run the production build
+npm run typecheck   # TypeScript check
 ```
 
-### Deploy to Vercel
+## Not done yet
 
-```bash
-npm install -g vercel
-vercel
-```
-
-### Deploy to Other Platforms
-
-The application is a standard Next.js app and can be deployed to:
-- Vercel
-- Netlify
-- AWS Amplify
-- Docker containers
-- Any Node.js hosting service
-
-## Future Enhancements
-
-- [ ] Real IoT device integration (MQTT/OPC-UA)
-- [ ] Machine learning model training interface
-- [ ] Historical data storage (database)
-- [ ] Multi-machine monitoring
-- [ ] Email/SMS alert notifications
-- [ ] Export reports (PDF/CSV)
-- [ ] User authentication and roles
-- [ ] Maintenance schedule calendar
-
-## License
-
-MIT License - Free for personal and commercial use
-
-## Support
-
-For questions or issues, please open an issue on GitHub.
-
----
-
-**Built with ❤️ for industrial automation and predictive maintenance**
-
+- Physical MQL hardware validation and a calibrated nozzle flow.
+- Repeatable experimental data, false-alarm rate and alert-latency measurements.
+- Any trained fault-detection model (this app only applies fixed thresholds).
+- Authentication — the app is meant for a trusted local network.

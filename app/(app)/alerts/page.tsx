@@ -1,324 +1,210 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { Badge } from '@/components/ui/badge';
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table';
-import {
-  AlertTriangle,
-  Activity,
-  Thermometer,
-  Zap,
-  ShieldAlert,
-  Bell,
-  Filter,
-} from 'lucide-react';
-import { SensorResponse, SensorDataPoint } from '@/types/sensor';
+import { useState } from 'react';
+import { BellOff, CheckCheck, Download, ShieldAlert } from 'lucide-react';
+import { AlertTypeIcon, ALERT_TYPE_LABEL, SeverityPill, StatusPill } from '@/components/alert-bits';
+import { useToast } from '@/components/toast';
+import { Button, EmptyState, Page, PageHeader, PageLoader, Panel, PanelHeader, Segmented, StatTile } from '@/components/ui/kit';
+import { sendJson, usePoll } from '@/lib/client/use-poll';
+import { fmtDateTime, fmtDuration } from '@/lib/format';
+import { SENSORS } from '@/lib/sensors';
+import type { AlertRow, AlertsResponse, AlertType } from '@/types/monitor';
 
-interface Alert {
-  time: number;
-  issue: string;
-  severity: 'Critical' | 'High' | 'Medium';
-  value: number;
-  threshold: number;
-  icon: any;
-  type: string;
+type StatusFilter = 'all' | 'open' | 'resolved';
+type TypeFilter = 'all' | AlertType;
+
+const STATUS_OPTIONS: { value: StatusFilter; label: string }[] = [
+  { value: 'all', label: 'All' },
+  { value: 'open', label: 'Open' },
+  { value: 'resolved', label: 'Resolved' },
+];
+
+const TYPE_OPTIONS: { value: TypeFilter; label: string }[] = [
+  { value: 'all', label: 'All types' },
+  { value: 'temperature', label: 'Temperature' },
+  { value: 'vibration', label: 'Vibration' },
+  { value: 'current', label: 'Current' },
+  { value: 'lubrication', label: 'Lubrication' },
+];
+
+const PAGE_SIZE = 50;
+
+function valueText(a: AlertRow): string {
+  if (a.type === 'lubrication') return a.value === null ? '—' : `${a.value.toFixed(1)} °C`;
+  const m = SENSORS[a.type];
+  const peak = a.peak ?? a.value;
+  return peak === null ? '—' : `${peak.toFixed(m.decimals)} ${m.unit}`;
+}
+
+function limitText(a: AlertRow): string {
+  if (a.threshold === null) return '—';
+  if (a.type === 'lubrication') return `${a.threshold} °C`;
+  const m = SENSORS[a.type];
+  return `${a.threshold.toFixed(m.decimals > 2 ? 2 : 1)} ${m.unit}`;
 }
 
 export default function AlertsPage() {
-  const [sensorData, setSensorData] = useState<SensorResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [filter, setFilter] = useState<string>('all');
+  const toast = useToast();
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
+  const [limit, setLimit] = useState(PAGE_SIZE);
+  const [busy, setBusy] = useState(false);
 
-  useEffect(() => {
-    async function fetchData() {
-      try {
-        const response = await fetch('/api/sensor-data');
-        const data = await response.json();
-        setSensorData(data);
-      } catch (error) {
-        console.error('Failed to fetch sensor data:', error);
-      } finally {
-        setLoading(false);
-      }
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (statusFilter !== 'all') params.set('status', statusFilter);
+  if (typeFilter !== 'all') params.set('type', typeFilter);
+  const { data, loading, refresh } = usePoll<AlertsResponse>(`/api/alerts?${params}`, 3000);
+
+  async function act(body: object, success: string) {
+    setBusy(true);
+    try {
+      await sendJson('POST', '/api/alerts', body);
+      await refresh();
+      toast(success, 'success');
+    } catch (e) {
+      toast(e instanceof Error ? e.message : 'Action failed', 'error');
+    } finally {
+      setBusy(false);
     }
-    fetchData();
-  }, []);
-
-  if (loading || !sensorData) {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <div className="text-center">
-          <div className="relative mx-auto h-14 w-14">
-            <div className="absolute inset-0 animate-spin rounded-full border-2 border-transparent border-t-red-500" />
-            <div className="absolute inset-2 animate-spin rounded-full border-2 border-transparent border-b-amber-500" style={{ animationDirection: 'reverse', animationDuration: '1.5s' }} />
-          </div>
-          <p className="mt-5 text-sm text-white/40">Loading alerts...</p>
-        </div>
-      </div>
-    );
   }
 
-  const { data, thresholds } = sensorData;
-  const alerts: Alert[] = [];
+  if (!data && loading) return <PageLoader label="Loading alerts…" />;
 
-  data.forEach((point: SensorDataPoint) => {
-    if (point.vibration > thresholds.vibration) {
-      alerts.push({
-        time: point.time,
-        issue: 'Vibration Exceeded',
-        severity: 'Critical',
-        value: point.vibration,
-        threshold: thresholds.vibration,
-        icon: Activity,
-        type: 'vibration',
-      });
-    }
-    if (point.temperature > thresholds.temperature) {
-      alerts.push({
-        time: point.time,
-        issue: 'Temperature Exceeded',
-        severity: 'High',
-        value: point.temperature,
-        threshold: thresholds.temperature,
-        icon: Thermometer,
-        type: 'temperature',
-      });
-    }
-    if (point.current > thresholds.current) {
-      alerts.push({
-        time: point.time,
-        issue: 'Current Exceeded',
-        severity: 'Medium',
-        value: point.current,
-        threshold: thresholds.current,
-        icon: Zap,
-        type: 'current',
-      });
-    }
-  });
-
-  const filteredAlerts =
-    filter === 'all' ? alerts : alerts.filter((a) => a.type === filter);
-
-  const severityConfig = {
-    Critical: {
-      badge: 'bg-red-500/10 text-red-400 border-red-500/20',
-      dot: 'bg-red-400',
-    },
-    High: {
-      badge: 'bg-amber-500/10 text-amber-400 border-amber-500/20',
-      dot: 'bg-amber-400',
-    },
-    Medium: {
-      badge: 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20',
-      dot: 'bg-yellow-400',
-    },
-  };
-
-  const criticalCount = alerts.filter((a) => a.severity === 'Critical').length;
-  const highCount = alerts.filter((a) => a.severity === 'High').length;
-  const mediumCount = alerts.filter((a) => a.severity === 'Medium').length;
+  const counts = data?.counts;
+  const faults = counts ? counts.byType.temperature + counts.byType.vibration + counts.byType.current : 0;
+  const openFaults = counts?.active ?? 0;
 
   return (
-    <div className="p-6 lg:p-8 space-y-6 max-w-[1400px]">
-      {/* Header */}
-      <div className="flex items-end justify-between">
-        <div>
-          <div className="flex items-center gap-3 mb-1">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-red-500/10">
-              <ShieldAlert className="h-4.5 w-4.5 text-red-400" />
+    <Page>
+      <PageHeader
+        icon={ShieldAlert}
+        tone="danger"
+        title="Alerts"
+        description="Threshold violations and lubrication events, newest first"
+        actions={
+          <>
+            <Button
+              size="sm"
+              icon={CheckCheck}
+              disabled={openFaults === 0}
+              loading={busy}
+              onClick={() => act({ action: 'acknowledge_all' }, 'All active alerts acknowledged')}
+            >
+              Acknowledge all
+            </Button>
+            <a
+              href="/api/export?kind=alerts&range=all"
+              className="inline-flex h-8 items-center gap-2 rounded-lg border border-white/12 bg-white/[0.06] px-3 text-xs font-medium text-white transition-colors hover:bg-white/[0.1]"
+            >
+              <Download className="h-4 w-4" aria-hidden />
+              CSV
+            </a>
+          </>
+        }
+      />
+
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <StatTile label="Active" value={openFaults} tone={openFaults > 0 ? 'danger' : 'ok'} sub={openFaults > 0 ? 'need attention' : 'nothing outstanding'} />
+        <StatTile label="Acknowledged" value={counts?.acknowledged ?? 0} tone={(counts?.acknowledged ?? 0) > 0 ? 'warn' : 'neutral'} sub="still out of range" />
+        <StatTile label="Resolved" value={counts?.resolved ?? 0} tone="ok" sub="back within limits" />
+        <StatTile label="Threshold alerts, all time" value={faults} sub={`${counts?.bySeverity.Critical ?? 0} critical · ${counts?.bySeverity.High ?? 0} high · ${counts?.bySeverity.Medium ?? 0} medium`} />
+      </div>
+
+      <Panel>
+        <PanelHeader
+          title="Alert history"
+          description={data ? `${data.total.toLocaleString()} matching ${data.total === 1 ? 'entry' : 'entries'}` : undefined}
+          actions={
+            <div className="flex flex-wrap items-center gap-2">
+              <Segmented label="Status filter" value={statusFilter} onChange={(v) => { setStatusFilter(v); setLimit(PAGE_SIZE); }} options={STATUS_OPTIONS} size="sm" />
+              <select
+                aria-label="Type filter"
+                value={typeFilter}
+                onChange={(e) => { setTypeFilter(e.target.value as TypeFilter); setLimit(PAGE_SIZE); }}
+                className="h-8 rounded-lg border border-white/12 bg-[#0b1020] px-2.5 text-xs font-medium text-white outline-none focus:border-sky-400/60"
+              >
+                {TYPE_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
             </div>
-            <h1 className="text-2xl font-bold text-white tracking-tight">Alert Monitor</h1>
-          </div>
-          <p className="text-sm text-white/40 ml-12">
-            Threshold violations and anomaly detection
-          </p>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <Bell className="h-3.5 w-3.5 text-white/30" />
-          <span className="text-xs text-white/30">
-            {alerts.length} alert{alerts.length !== 1 ? 's' : ''} detected
-          </span>
-        </div>
-      </div>
+          }
+        />
 
-      {/* Summary Cards */}
-      <div className="grid gap-4 md:grid-cols-4 stagger-children">
-        <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] p-5">
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-medium uppercase tracking-wider text-white/30">Total</span>
-            <AlertTriangle className="h-4 w-4 text-white/20" />
-          </div>
-          <div className="text-3xl font-bold text-white">{alerts.length}</div>
-          <p className="mt-1 text-xs text-white/30">threshold violations</p>
-        </div>
-
-        <div className="rounded-2xl border border-red-500/10 bg-red-500/[0.03] p-5">
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-medium uppercase tracking-wider text-red-400/50">Critical</span>
-            <div className="h-2 w-2 rounded-full bg-red-400 animate-pulse" />
-          </div>
-          <div className="text-3xl font-bold text-red-400">{criticalCount}</div>
-          <p className="mt-1 text-xs text-red-400/40">immediate action</p>
-        </div>
-
-        <div className="rounded-2xl border border-amber-500/10 bg-amber-500/[0.03] p-5">
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-medium uppercase tracking-wider text-amber-400/50">High</span>
-            <div className="h-2 w-2 rounded-full bg-amber-400" />
-          </div>
-          <div className="text-3xl font-bold text-amber-400">{highCount}</div>
-          <p className="mt-1 text-xs text-amber-400/40">needs attention</p>
-        </div>
-
-        <div className="rounded-2xl border border-yellow-500/10 bg-yellow-500/[0.03] p-5">
-          <div className="flex items-center justify-between mb-3">
-            <span className="text-xs font-medium uppercase tracking-wider text-yellow-400/50">Medium</span>
-            <div className="h-2 w-2 rounded-full bg-yellow-400" />
-          </div>
-          <div className="text-3xl font-bold text-yellow-400">{mediumCount}</div>
-          <p className="mt-1 text-xs text-yellow-400/40">monitor closely</p>
-        </div>
-      </div>
-
-      {/* Filter Bar */}
-      <div className="flex items-center gap-2">
-        <Filter className="h-3.5 w-3.5 text-white/30" />
-        <span className="text-xs text-white/30 mr-1">Filter:</span>
-        {['all', 'vibration', 'temperature', 'current'].map((f) => (
-          <button
-            key={f}
-            onClick={() => setFilter(f)}
-            className={`rounded-lg px-3 py-1.5 text-xs font-medium transition-all ${
-              filter === f
-                ? 'bg-white/10 text-white'
-                : 'text-white/30 hover:bg-white/[0.04] hover:text-white/60'
-            }`}
-          >
-            {f.charAt(0).toUpperCase() + f.slice(1)}
-          </button>
-        ))}
-      </div>
-
-      {/* Alerts Table */}
-      <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] overflow-hidden">
-        <div className="border-b border-white/[0.04] px-6 py-4">
-          <h3 className="text-sm font-semibold text-white">Alert History</h3>
-          <p className="text-xs text-white/30 mt-0.5">
-            All threshold violations in the current monitoring window
-          </p>
-        </div>
-
-        {filteredAlerts.length === 0 ? (
-          <div className="text-center py-16">
-            <Activity className="h-10 w-10 text-white/10 mx-auto mb-3" />
-            <h3 className="text-sm font-semibold text-white/60 mb-1">No Alerts</h3>
-            <p className="text-xs text-white/30">
-              {filter === 'all'
-                ? 'All systems operating within normal parameters'
-                : `No ${filter} alerts detected`}
-            </p>
-          </div>
+        {!data || data.alerts.length === 0 ? (
+          <EmptyState
+            icon={BellOff}
+            title="No alerts match"
+            description={statusFilter === 'all' && typeFilter === 'all' ? 'Nothing has crossed a threshold yet.' : 'Try a different filter.'}
+          />
         ) : (
-          <Table>
-            <TableHeader>
-              <TableRow className="hover:bg-transparent border-white/[0.04]">
-                <TableHead className="text-white/30 text-xs font-medium uppercase tracking-wider">Time</TableHead>
-                <TableHead className="text-white/30 text-xs font-medium uppercase tracking-wider">Issue</TableHead>
-                <TableHead className="text-white/30 text-xs font-medium uppercase tracking-wider">Value</TableHead>
-                <TableHead className="text-white/30 text-xs font-medium uppercase tracking-wider">Threshold</TableHead>
-                <TableHead className="text-white/30 text-xs font-medium uppercase tracking-wider">Severity</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filteredAlerts.map((alert, index) => {
-                const Icon = alert.icon;
-                const config = severityConfig[alert.severity];
-                return (
-                  <TableRow
-                    key={index}
-                    className="border-white/[0.04] hover:bg-white/[0.02] transition-colors"
-                  >
-                    <TableCell className="font-mono text-xs text-white/70">
-                      {alert.time.toFixed(1)}s
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2.5">
-                        <Icon className="h-3.5 w-3.5 text-white/30" />
-                        <span className="text-sm text-white/80">{alert.issue}</span>
-                      </div>
-                    </TableCell>
-                    <TableCell className="font-mono text-xs text-white/70">
-                      {alert.value.toFixed(3)}
-                    </TableCell>
-                    <TableCell className="font-mono text-xs text-white/30">
-                      {alert.threshold.toFixed(3)}
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex items-center gap-2">
-                        <div className={`h-1.5 w-1.5 rounded-full ${config.dot}`} />
-                        <Badge className={`text-[10px] border ${config.badge}`}>
-                          {alert.severity}
-                        </Badge>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
-        )}
-      </div>
-
-      {/* Alert Analysis */}
-      {alerts.length > 0 && (
-        <div className="rounded-2xl border border-white/[0.06] bg-white/[0.02] overflow-hidden">
-          <div className="border-b border-white/[0.04] px-6 py-4">
-            <h3 className="text-sm font-semibold text-white">Analysis Summary</h3>
-          </div>
-          <div className="p-6 space-y-4">
-            {/* Alert warning banner */}
-            <div className="flex items-start gap-3 p-4 rounded-xl bg-red-500/[0.05] border border-red-500/10">
-              <AlertTriangle className="h-4 w-4 text-red-400 mt-0.5 flex-shrink-0" />
-              <div>
-                <h4 className="text-sm font-semibold text-white mb-1">
-                  Multiple Threshold Violations Detected
-                </h4>
-                <p className="text-xs text-white/40 leading-relaxed">
-                  The machine experienced {alerts.length} threshold violations concentrated
-                  between {alerts[0].time.toFixed(1)}s and{' '}
-                  {alerts[alerts.length - 1].time.toFixed(1)}s. This pattern suggests a
-                  transient operational issue requiring immediate attention.
-                </p>
+          <>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[820px] text-sm">
+                <thead>
+                  <tr className="border-b border-white/[0.06] text-left text-xs text-white/55">
+                    <th className="px-5 py-2.5 font-medium">Time</th>
+                    <th className="px-3 py-2.5 font-medium">Type</th>
+                    <th className="px-3 py-2.5 font-medium">Message</th>
+                    <th className="px-3 py-2.5 font-medium">Severity</th>
+                    <th className="px-3 py-2.5 text-right font-medium">Peak / temp</th>
+                    <th className="px-3 py-2.5 text-right font-medium">Limit</th>
+                    <th className="px-3 py-2.5 text-right font-medium">Duration</th>
+                    <th className="px-3 py-2.5 font-medium">Status</th>
+                    <th className="px-5 py-2.5" />
+                  </tr>
+                </thead>
+                <tbody>
+                  {data.alerts.map((a) => (
+                    <tr key={a.id} className="border-b border-white/[0.04] transition-colors last:border-0 hover:bg-white/[0.02]">
+                      <td className="whitespace-nowrap px-5 py-3 font-mono text-xs text-white/75">{fmtDateTime(a.startedAt)}</td>
+                      <td className="px-3 py-3">
+                        <span className="inline-flex items-center gap-2 text-white/85">
+                          <AlertTypeIcon type={a.type} className="h-4 w-4 text-white/50" />
+                          {ALERT_TYPE_LABEL[a.type]}
+                        </span>
+                      </td>
+                      <td className="px-3 py-3 text-white">{a.message}</td>
+                      <td className="px-3 py-3">
+                        <SeverityPill severity={a.severity} />
+                      </td>
+                      <td className="px-3 py-3 text-right font-mono text-xs tabular-nums text-white/85">{valueText(a)}</td>
+                      <td className="px-3 py-3 text-right font-mono text-xs tabular-nums text-white/55">{limitText(a)}</td>
+                      <td className="whitespace-nowrap px-3 py-3 text-right font-mono text-xs tabular-nums text-white/65">
+                        {a.resolvedAt ? fmtDuration(a.resolvedAt - a.startedAt) : 'ongoing'}
+                      </td>
+                      <td className="px-3 py-3">
+                        <StatusPill status={a.status} type={a.type} />
+                      </td>
+                      <td className="px-5 py-3 text-right">
+                        {a.status === 'active' && a.type !== 'lubrication' && (
+                          <Button size="sm" variant="ghost" disabled={busy} onClick={() => act({ action: 'acknowledge', id: a.id }, 'Alert acknowledged')}>
+                            Acknowledge
+                          </Button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {data.total > data.alerts.length && (
+              <div className="border-t border-white/[0.06] p-3 text-center">
+                <Button size="sm" variant="ghost" onClick={() => setLimit((l) => l + PAGE_SIZE)}>
+                  Show more ({data.total - data.alerts.length} remaining)
+                </Button>
               </div>
-            </div>
+            )}
+          </>
+        )}
+      </Panel>
 
-            {/* Breakdown */}
-            <div className="grid gap-3 md:grid-cols-3">
-              {[
-                { label: 'Vibration', count: alerts.filter((a) => a.type === 'vibration').length, color: 'blue' },
-                { label: 'Temperature', count: alerts.filter((a) => a.type === 'temperature').length, color: 'amber' },
-                { label: 'Current', count: alerts.filter((a) => a.type === 'current').length, color: 'emerald' },
-              ].map((item) => (
-                <div
-                  key={item.label}
-                  className="rounded-xl border border-white/[0.06] bg-white/[0.02] p-4"
-                >
-                  <p className="text-xs text-white/30 mb-1">{item.label} Alerts</p>
-                  <p className="text-2xl font-bold text-white">{item.count}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
+      <p className="text-xs leading-relaxed text-white/50">
+        Alerts use fixed limits (editable in Settings). An alert opens when a reading exceeds its limit and resolves after three consecutive readings back
+        within it. Acknowledging records that someone has seen an alert; it stays open until the reading recovers.
+      </p>
+    </Page>
   );
 }
