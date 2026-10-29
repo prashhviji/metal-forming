@@ -2,7 +2,7 @@
 
 > **Trained and tested on SIMULATED data from the app's built-in simulator. These numbers show that the pipeline works and how the models compare on that data; they are not accuracy on a real machine.**
 
-Generated 2026-10-29 05:13 UTC · scikit-learn 1.9.1 · seed 42
+Generated 2026-10-29 05:17 UTC · scikit-learn 1.9.1 · seed 42
 
 ## Data
 
@@ -37,10 +37,10 @@ Split is chronological, cut at quiet moments with no fault nearby. Supervised al
 | Isolation Forest | unsupervised | 89.3% | 94.3% | 0.917 | 0.998 | 95/95 | 1 s | 3.9 |
 
 - *Precision / recall / F1* are per sample. *Episodes caught* = fault episodes flagged at least once while active. *Median delay* = seconds from the start of the labelled fault to the first alarm. *False alarms / h* counts alarm bursts in fault-free operation (bursts closer than 10 s are merged).
-- Models are ranked within their family by validation PR-AUC; the "best" picks below never look at the test set.
+- Rows are sorted by F1 within each family. The "best" picks below are made by validation PR-AUC and never look at the test set.
 - Best supervised: **Logistic Regression** · best unsupervised: **Local Outlier Factor**.
 
-## What drives the best tree model
+## What drives the Random Forest
 
 | Feature | Importance |
 |---|---|
@@ -59,7 +59,7 @@ Split is chronological, cut at quiet moments with no fault nearby. Supervised al
 
 - All data is simulated. Faults are injected by the simulator and labelled by it, so the models learn the simulator's idea of a fault.
 - The fixed-threshold rule already flags 95/95 test fault episodes, because simulated faults are built to push a sensor over its limit. Learned models mainly differ in how early they alarm, how many fault samples they cover and how many false alarms they raise — not in whether a fault is noticed at all.
-- The simulator has no slow precursor before a fault, so this is fault *detection*, not early *prediction*. Predicting a failure ahead of time needs real run-to-failure data.
+- The simulator has no slow precursor before a fault, so this is fault detection, not early prediction. Predicting a failure ahead of time needs real run-to-failure data.
 - Sample-level scores depend on how the label boundary is drawn (here: envelope >= 20%). Treat F1 as indicative; episode and false-alarm figures are less sensitive.
 - Negative control: the same logistic regression trained on shuffled labels reaches test ROC-AUC 0.48 (chance = 0.50), so the high scores of the real models come from the sensor patterns, not from a leak in the pipeline. Near-perfect scores mainly show that simulated faults are easy to separate from simulated normal operation.
 - Real machines add sensor noise, load changes and drift that the simulator does not have. Re-run this script on labelled data from the hardware before claiming any accuracy.

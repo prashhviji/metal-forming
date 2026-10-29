@@ -34,7 +34,7 @@ const FIGURES: { name: string; title: string; caption: string; alt: string; wide
   },
   {
     name: 'detection_timeline',
-    title: 'One fault, minute by minute',
+    title: 'One fault in the test period',
     caption: 'Sensor traces from the test period, the labelled fault, and when the threshold rule and the best supervised model raised an alarm.',
     alt: 'Timeline of vibration, temperature and current around a labelled fault with alarm markers for the threshold rule and the best supervised model',
     wide: true,
@@ -73,7 +73,7 @@ function takeaways(models: MlModel[]): string[] {
     );
   }
   out.push(
-    `The learned models cover more of each fault: supervised models flag ${span(sup.map((m) => m.metrics.recall * 100), (v) => `${v.toFixed(0)}%`)} of fault samples against ${pct(base.metrics.recall, 0)} for the threshold rule, and they alarm sooner (median delay ${span(sup.map((m) => m.metrics.delay_median_s ?? 0), (v) => `${v.toFixed(0)} s`)} against ${(base.metrics.delay_median_s ?? 0).toFixed(0)} s).`
+    `The learned models cover more of each fault: supervised models flag ${span(sup.map((m) => m.metrics.recall * 100), (v) => `${v.toFixed(1)}%`)} of fault samples against ${pct(base.metrics.recall)} for the threshold rule, and they alarm sooner (median delay ${span(sup.map((m) => m.metrics.delay_median_s ?? 0), (v) => `${v.toFixed(0)} s`)} against ${(base.metrics.delay_median_s ?? 0).toFixed(0)} s).`
   );
   out.push(
     `The price is false alarms: ${span(sup.map((m) => m.metrics.false_alarms_per_hour), (v) => v.toFixed(1))} per hour for supervised models and ${span(uns.map((m) => m.metrics.false_alarms_per_hour), (v) => v.toFixed(1))} per hour for unsupervised ones, against ${base.metrics.false_alarms_per_hour.toFixed(1)} for the threshold rule.`
@@ -187,7 +187,7 @@ function SplitTable({ results }: { results: MlResults }) {
   );
 }
 
-const COMMANDS = `# one-time setup (Python 3.9+)
+const COMMANDS = `# one-time setup (tested with Python 3.12)
 python3 -m venv ml/.venv && ml/.venv/bin/pip install -r ml/requirements.txt
 
 # 1. start a separate simulator that writes labelled data to ml/data (your dashboard data is untouched)

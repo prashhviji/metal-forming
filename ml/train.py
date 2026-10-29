@@ -631,7 +631,7 @@ def main():
         f"The fixed-threshold rule already flags {base_m['episodes_detected']}/{base_m['episodes']} test fault episodes, because simulated faults are "
         "built to push a sensor over its limit. Learned models mainly differ in how early they alarm, how many fault samples they cover "
         "and how many false alarms they raise — not in whether a fault is noticed at all.",
-        "The simulator has no slow precursor before a fault, so this is fault *detection*, not early *prediction*. Predicting a failure "
+        "The simulator has no slow precursor before a fault, so this is fault detection, not early prediction. Predicting a failure "
         "ahead of time needs real run-to-failure data.",
         "Sample-level scores depend on how the label boundary is drawn (here: envelope >= 20%). Treat F1 as indicative; episode and false-alarm figures are less sensitive.",
         f"Negative control: the same logistic regression trained on shuffled labels reaches test ROC-AUC {control_auc:.2f} (chance = 0.50), "
